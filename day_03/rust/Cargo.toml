@@ -1,0 +1,4 @@
+[package]
+name = "aoc_day_03"
+version = "0.1.0"
+authors = ["Mark Elias McDermott <mark.elias.mcdermott@gmail.com>"]
