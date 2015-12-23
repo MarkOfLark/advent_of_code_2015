@@ -3,7 +3,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 
-fn wrapping_paper_req(line: String) -> (u64, u64) {
+fn wrapping_material_req(line: String) -> (u64, u64) {
     let mut dim: Vec<u64> = Vec::new();
     let dim_str: Vec<&str> = line.split("x").collect();
     for d in &dim_str {
@@ -25,7 +25,7 @@ fn main() {
     for line in reader.lines() {
         match line {
             Ok(line) => {
-                let mat = wrapping_paper_req(line);
+                let mat = wrapping_material_req(line);
                 paper += mat.0;
                 ribbon += mat.1;
             },
