@@ -2,18 +2,19 @@ use std::env;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Clone, Debug)]
 enum Signal {
-    None,
-    Value(u16),
     Name(String),
+    Value(u16),
 }
 
 #[derive(Debug)]
 enum Operation {
-    None,
+    PASS,
     AND,
     OR,
     LSHIFT,
@@ -22,89 +23,63 @@ enum Operation {
 }
 
 #[derive(Debug)]
-struct Node {
-    in0: Signal,
-    in1: Signal,
+struct Node<'a> {
+    in0: Option<Rc<RefCell<&'a Signal>>>,
+    in1: Option<Rc<RefCell<&'a Signal>>>,
+    out: Rc<RefCell<&'a Signal>>,
     op: Operation,
 }
 
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
-fn parse_signal_from_input(name: &str) -> Signal {
-    match name.parse() {
+fn parse_signal_from_input<'a>(map: &'a mut BTreeMap<String,Signal>, name: &str) -> Rc<RefCell<&'a Signal>> {
+    map.insert(name.to_string(),match name.parse() {
         Ok(val) => Signal::Value(val),
-        Err(err)=> Signal::Name(name.to_string())
-    }
+        _ => Signal::Name(name.to_string())
+    });
+
+    Rc::new(RefCell::new(map.get(name).expect("error with map")))
 }
 
 
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-fn get_signal_value(map: &HashMap<String,Node>, sig: &Signal) -> u16 {
-    match *sig {
-        Signal::Value(val)     => val,
-        Signal::None           => panic!("cannot get value for None signal"),
-        Signal::Name(ref name) => {
-            print!("{}: ", name);
-            let node = map.get(name).expect("could not find sig name in map");
-            println!("{:?}",node);
-
-            match node.op {
-                Operation::None => {
-                    get_signal_value(map, &node.in0)
-                }
-                Operation::NOT => {
-                    !get_signal_value(map, &node.in0)
-                }
-                _ => {
-                    let val0 = get_signal_value(map, &node.in0);
-                    let val1 = get_signal_value(map, &node.in1);
-                    match node.op {
-                        Operation::LSHIFT => val0 << val1,
-                        Operation::RSHIFT => val0 >> val1,
-                        Operation::AND    => val0 & val1,
-                        Operation::OR     => val0 | val1,
-                        _                 => panic!("unreachable")
-                    } // end match on 2 operand operations
-                }
-            } // end match on all operations
-        } // end handling of named signal
-    } // end match on signal type
-} // end get_signal_value
 
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if 3 > args.len() {
-        panic!("Arguments Required: <path to file> <signal name>");
+    if 2 > args.len() {
+        panic!("Arguments Required: <path to file>");
     }
     let f = File::open(&args[1]).ok().expect("could not open file");
     let reader = BufReader::new(f);
-    let sig = Signal::Name(args[2].to_string());
 
-    // Read in all the outputs sorted alphabetically and then asign
-    // an index to each output signal starting at 0
-    let mut out_sig: HashMap<String,Node> = HashMap::new();
+    // build list of nodes and signals that need to be resolved
+    let mut signals: BTreeMap<String,Signal> = BTreeMap::new();
+    let mut nodes: Vec<Node> = Vec::new();
     for line in reader.lines() {
         match line {
             Ok(line) => {
                 // split input and output string
                 let v: Vec<&str> = line.split(" -> ").collect();
 
+                // handle output signal string
+                let out_sig = parse_signal_from_input(&mut signals,&v[1]);
+
                 // split input string
                 let vi: Vec<&str> = v[0].split_whitespace().collect();
                 let node = match vi.len() {
                     1 => { // A passthrough signal
-                        Node{in0: parse_signal_from_input(&vi[0]),
-                             in1: Signal::None,
-                              op: Operation::None}
+                        Node{in0: Some(parse_signal_from_input(&mut signals,&vi[0])),
+                             in1: None, //None::<Rc<RefCell<Signal>>,
+                             out: out_sig.clone(),
+                              op: Operation::PASS}
                     },
                     2 => { // A NOT gate
-                        Node{in0: parse_signal_from_input(&vi[1]),
-                             in1: Signal::None,
+                        Node{in0: Some(parse_signal_from_input(&mut signals,&vi[1])),
+                             in1: None,
+                             out: out_sig.clone(),
                               op: Operation::NOT}
                     },
                     _ => { // Any of the other nodes types
@@ -116,16 +91,28 @@ fn main() {
                             _        => panic!("unrecognized operation")
                         };
 
-                        Node{in0: parse_signal_from_input(&vi[0]),
-                             in1: parse_signal_from_input(&vi[2]),
+                        Node{in0: Some(parse_signal_from_input(&mut signals,&vi[0])),
+                             in1: Some(parse_signal_from_input(&mut signals,&vi[2])),
+                             out: out_sig.clone(),
                               op: op}
                     }
                 };
-                out_sig.insert(v[1].to_string(),node);
+
+
+                //println!("{:?} : {:?}",out_sig,node);
+                nodes.push(node);
             }
             Err(err) => panic!(err)
         }
     }
 
-    println!("{}",get_signal_value(&out_sig,&sig));
+    //println!("{}",get_signal_value(&out_sig,&sig));
+    let mut len = nodes.len();
+    while 0 < len {
+        for ix in 0..len {
+            nodes.swap_remove(ix);
+            len = nodes.len();
+            break;
+        }
+    }
 }
